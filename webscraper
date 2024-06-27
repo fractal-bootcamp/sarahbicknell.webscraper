@@ -16,7 +16,6 @@ async function getHTML(url) {
         return html
     } catch(error){
         console.error(`Hiii Error fetching URL ${url}: ${error.message}`);
-        process.stdout.write('');
         return null
     }
 }
@@ -59,8 +58,6 @@ function processHTML(html, baseUrl, linkLimit){
                  links.push(url.toString());
              } catch (e) {
                  console.log(`Invalid URL: ${href}`);
-                 process.stdout.write('');
-
              }
          }
     })
@@ -90,12 +87,11 @@ async function scrape(url, baseUrl, linkLimit, depth, outputDir, visited = new S
     //if depth is 0, we don't want to traverse anymore, return
     if (visited.has(url)){
         console.log(`skipping url duplicate: ${url}`)
-        process.stdout.write('');
 
         return;
     } else if (depth === 0){
         console.log(`reached max depth, stopping at url: ${url}`)
-        process.stdout.write('');
+
         return
 
     } 
@@ -132,7 +128,6 @@ async function scrape(url, baseUrl, linkLimit, depth, outputDir, visited = new S
         }
     } catch (error){
         console.error(`Error scraping ${url}: ${error.message}`);
-        process.stdout.write('');
 
     }
 }
@@ -141,8 +136,8 @@ program
     .version('1.0.0')
     .description('An HTML scraper CLI tool')
     .requiredOption('-u, --url <url>', 'URL to scrape')
-    .option('-d, --depth <number', 'Recursive depth to scrape', '1')
-    .option('-l, --limit <number', 'Limit of links to scrape per page', '0')
+    .option('-d, --depth <number>', 'Recursive depth to scrape', '1')
+    .option('-l, --limit <number>', 'Limit of links to scrape per page', '0')
     .option('-o, --output <directory>', 'Output directory', './output')
     .parse(process.argv)
 
