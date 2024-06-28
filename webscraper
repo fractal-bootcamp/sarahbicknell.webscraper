@@ -15,8 +15,8 @@ async function getHTML(url) {
         const html = response.data
         return html
     } catch(error){
-        console.error(`Hiii Error fetching URL ${url}: ${error.message}`);
-        return null
+        console.error(`Error fetching URL: ${url}: ${error.message}`);
+        throw error
     }
 }
 
@@ -41,9 +41,11 @@ function processHTML(html, baseUrl, linkLimit){
 
     //extract links up to limit
     const links = []
+    const extractionLimit = linkLimit * 3
+    //im adding this so that we can handle the issue of duplicate links but still return the requested amount 
 
     $('a[href]').each((index, element) => {
-        if (links.length >= linkLimit) return false;
+        if (links.length >= extractionLimit) return false;
 
          //get value of the href attribute of current element 
          let href = $(element).attr('href');
@@ -61,6 +63,7 @@ function processHTML(html, baseUrl, linkLimit){
              }
          }
     })
+    links.sort()
 
     //return as an object with properties
     return {processedHTML: $.html(), extractedLinks: links} 
@@ -81,60 +84,102 @@ function saveHTML(content, outputDir, filename){
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+//lets validate urls more stringently
+function validateUrl(url){
+    try{
+        const parsedUrl = new URL(url)
+        if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:'){
+            return {valid: false, message: `\nInvalid protocol: ${url.protocol}`}
+        }
+        if (!parsedUrl.hostname){
+            return {valid: false, message: `\nMissing hostname`}
+        }
+        if (!/\.[a-z]{2,}$/i.test(parsedUrl.hostname)) {
+            return {valid: false, message: `\nInvalid top-level domain`}
+        }
+        return {valid: true, message: ''}
+    }
+    catch(_){
+        return {valid: false, message: 'URL parsing error'}
+    } 
+}
+
+function fileExists(outputDir, fileName) {
+    return fs.existsSync(path.join(outputDir, fileName));
+}
+
+
 //calls all the functions to scrape a site, then recursively calls itself to traverse links
 async function scrape(url, baseUrl, linkLimit, depth, outputDir, visited = new Set()){
 
     //if depth is 0, we don't want to traverse anymore, return
     if (visited.has(url)){
         console.log(`skipping url duplicate: ${url}`)
-
         return;
+
     } else if (depth === 0){
         console.log(`reached max depth, stopping at url: ${url}`)
-
         return
 
     } 
+    console.log(`Attempting to scrape URL at depth ${depth}: ${url}`);
 
     //add the url so we can track we don't visit the same one multiple times
     visited.add(url)
 
-    console.log(`Scraping URL (depth ${depth}): ${url}`);
-
+    
     try {
-    //get the html
+        //another check for valid url format 
+        //get the html
         const html = await getHTML(url)
-        if (!html) return;
+
+        if (html === null) {
+            console.log(`Skipping ${url} due to 404 error`)
+            return
+        } 
+
+        console.log(`Successfully fetched HTML for ${url}`);
 
         //clean up html and get links
         const {processedHTML, extractedLinks} = processHTML(html, baseUrl, linkLimit)
 
-        console.log(`Extracted ${extractedLinks.length} links`);
+        console.log(`Processed HTML`, depth > 1? `& extracted ${extractedLinks.length} links`: ``);
 
         //save html to output file based on sanitized url
-        if (processedHTML) {
-            //define example dir and filename for testing
-            const fileName = `${depth}_${url.replace(/[^a-z0-9]/gi, "_")}.html`;
-            
-            saveHTML(processedHTML, outputDir, fileName)
-        }
+        const fileName = `${depth}_${url.replace(/[^a-z0-9]/gi, "_")}.html`;
+        if (processedHTML){
+            if (fileExists(outputDir, fileName)) {
+                //might remove this, without other changes it will cause everything downstream to be skipped too 
+                console.log(`File for ${url} already exists, skipping.`);
+                return;
+            } else {
+                saveHTML(processedHTML, outputDir, fileName)
 
-        if (depth > 1){
-            for(let link = 0; link < extractedLinks.length; link++){
-                await delay(500)
-                await scrape(extractedLinks[link], baseUrl, linkLimit, depth - 1, outputDir, visited)
             }
+        }
         
+        if (depth > 1){
+            //going to add capacity to add more links up to limit in case of skipped duplicates
+            let uniqueLinksProcessed = 0
+            for(let i = 0; i < extractedLinks.length && uniqueLinksProcessed < linkLimit; i++){
+                const link = extractedLinks[i];
+                if (!visited.has(link)) {
+                    await delay(500);
+                    await scrape(link, baseUrl, linkLimit, depth - 1, outputDir, visited);
+                    uniqueLinksProcessed++;
+                }
+            }
         }
     } catch (error){
         console.error(`Error scraping ${url}: ${error.message}`);
+        throw error;
 
     }
 }
 
 program
     .version('1.0.0')
-    .description('An HTML scraper CLI tool')
+    .description('A simple HTML scraper CLI tool')
     .requiredOption('-u, --url <url>', 'URL to scrape')
     .option('-d, --depth <number>', 'Recursive depth to scrape', '1')
     .option('-l, --limit <number>', 'Limit of links to scrape per page', '0')
@@ -152,10 +197,25 @@ async function main() {
     const depth = parseInt(options.depth)
     const outputDir = options.output
 
-    const baseUrl = new URL(url).origin;
+    const validateResult = validateUrl(url)
+    if (!validateResult.valid){
+        console.error(`Invalid url: ${url}`, validateResult.message? validateResult.message: '')
+        process.exit(1)
+    }
 
-    console.log(`Starting scrape of url ${url} with depth ${depth}`)
-    await scrape(url, baseUrl, linkLimit, depth, outputDir);
+    //create url object with js URL interface to get the base url for standardization of internal links
+    const baseUrl = new URL(url).origin;
+    
+
+    try{
+        await scrape(url, baseUrl, linkLimit, depth, outputDir);
+        console.log("Scraping completed successfully, check output folder for your new HTML files! ᕙ(‾̀◡‾́)ᕗ")
+    } catch(error){
+        //ok, improve this later - currently, any error causes this message to be logged, even if some scraping succeeded
+        console.error("An error was returned 乁(ツ゚)ㄏ : ", error.message)
+        process.exit(1);
+    }
+    
 }
 
 main().catch(error => {
