@@ -89,7 +89,7 @@ function validateUrl(url){
     try{
         const parsedUrl = new URL(url)
         if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:'){
-            return {valid: false, message: `\nInvalid protocol: ${url.protocol}`}
+            return {valid: false, message: `\nInvalid protocol: ${parsedUrl.protocol}`}
         }
         if (!parsedUrl.hostname){
             return {valid: false, message: `\nMissing hostname`}
